@@ -527,11 +527,27 @@ with tab3:
 
         st.metric("Historical observations",len(bt))
         st.dataframe(bt,use_container_width=True,hide_index=True)
-        if len(bt)>=3:
-            corr=bt["Score"].corr(bt["Forward revenue growth"])
-            st.metric(
-                "Score vs. next-year revenue-growth correlation",
-                "Not available" if pd.isna(corr) else f"{corr:.2f}"
+                if len(bt) >= 5:
+            pearson = bt["Score"].corr(
+                bt["Forward revenue growth"],
+                method="pearson"
+            )
+
+            spearman = bt["Score"].corr(
+                bt["Forward revenue growth"],
+                method="spearman"
+            )
+
+            a, b = st.columns(2)
+
+            a.metric(
+                "Pearson correlation",
+                "Not available" if pd.isna(pearson) else f"{pearson:.2f}"
+            )
+
+            b.metric(
+                "Spearman correlation",
+                "Not available" if pd.isna(spearman) else f"{spearman:.2f}"
             )
 
             st.subheader("Framework score vs. subsequent revenue growth")
@@ -544,12 +560,57 @@ with tab3:
                 y_label="Following-year revenue growth (%)"
             )
 
-            if not pd.isna(corr):
-                direction = "positive" if corr > 0 else "negative"
+            bt["Score range"] = pd.cut(
+                bt["Score"],
+                bins=[-1, 69, 84, 100],
+                labels=[
+                    "High risk (<70)",
+                    "Moderate (70–84)",
+                    "Low risk (85–100)"
+                ]
+            )
+
+            summary = (
+                bt.groupby(
+                    "Score range",
+                    observed=False
+                )["Forward revenue growth"]
+                .agg(["count", "mean", "median"])
+                .reset_index()
+            )
+
+            summary.columns = [
+                "Score range",
+                "Observations",
+                "Mean forward growth (%)",
+                "Median forward growth (%)"
+            ]
+
+            st.subheader("Subsequent growth by score range")
+
+            st.dataframe(
+                summary,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.caption(
+                "Pearson measures linear association; Spearman measures "
+                "rank-order association and is less sensitive to extreme "
+                "growth observations."
+            )
+
+            if not pd.isna(pearson):
+                direction = (
+                    "positive" if pearson > 0
+                    else "negative" if pearson < 0
+                    else "zero"
+                )
+
                 st.write(
-                    f"In this exploratory sample, the correlation is **{corr:.2f}** "
-                    f"({direction}). This is an association, not evidence of causation "
-                    f"or investment performance."
+                    f"In this exploratory sample, the Pearson correlation is "
+                    f"**{pearson:.2f}** ({direction}). This is an association, "
+                    "not evidence of causation or investment performance."
                 )
  
 

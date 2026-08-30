@@ -92,5 +92,10 @@ if "score" in st.session_state:
         with st.expander(f"Evidence {i}"): st.write(x)
     st.subheader("Analyst follow-ups")
     for x in ["Reconcile earnings with operating/free cash flow.","Inspect debt maturities and covenants.","Compare receivables/working capital with revenue.","Read relevant footnotes and risk factors."]: st.write("• "+x)
-    st.download_button("Download analyst report",st.session_state.report,file_name=f"{st.session_state.company.replace(' ','_')}_red_flags.md",mime="text/markdown")
+st.download_button(
+    "Download analyst report",
+    st.session_state["report"],
+    file_name=f"{str(st.session_state['company']).replace(' ','_')}_red_flags.md",
+    mime="text/markdown"
+)
     st.markdown(f"[Open SEC filing]({st.session_state.url})")

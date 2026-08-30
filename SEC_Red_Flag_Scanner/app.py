@@ -510,21 +510,23 @@ with tab3:
 
         st.metric("Historical observations",len(bt))
         st.dataframe(bt,use_container_width=True,hide_index=True)
-
         if len(bt)>=3:
             corr=bt["Score"].corr(bt["Forward revenue growth"])
-            st.metric("Score vs. next-year revenue-growth correlation",
-                      "Not available" if pd.isna(corr) else f"{corr:.2f}")
+            st.metric(
+                "Score vs. next-year revenue-growth correlation",
+                "Not available" if pd.isna(corr) else f"{corr:.2f}"
+            )
 
- st.subheader("Framework score vs. subsequent revenue growth")
+            st.subheader("Framework score vs. subsequent revenue growth")
 
-st.scatter_chart(
-    bt,
-    x="Score",
-    y="Forward revenue growth",
-    x_label="Historical framework score",
-    y_label="Following-year revenue growth (%)"
-)
+            st.scatter_chart(
+                bt,
+                x="Score",
+                y="Forward revenue growth",
+                x_label="Historical framework score",
+                y_label="Following-year revenue growth (%)"
+            )
+
             if not pd.isna(corr):
                 direction = "positive" if corr > 0 else "negative"
                 st.write(
@@ -532,6 +534,7 @@ st.scatter_chart(
                     f"({direction}). This is an association, not evidence of causation "
                     f"or investment performance."
                 )
+ 
 
         st.download_button(
             "Download historical backtest (CSV)",

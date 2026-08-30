@@ -528,22 +528,23 @@ with tab3:
 
         st.metric("Historical observations",len(bt))
         st.dataframe(bt,use_container_width=True,hide_index=True)
-                if len(bt) >= 5:
-            pearson = bt["Score"].corr(
-                bt["Forward revenue growth"],
-                method="pearson"
-            )
+    if len(bt) >= 5:
+        pearson = bt["Score"].corr(
+            bt["Forward revenue growth"],
+            method="pearson"
+        )
 
-            spearman = bt["Score"].corr(
-                bt["Forward revenue growth"],
-                method="spearman"
-            )
+        spearman = bt["Score"].corr(
+            bt["Forward revenue growth"],
+            method="spearman"
+        )
 
-            a, b = st.columns(2)
+        a, b = st.columns(2)
 
-            a.metric(
-                "Pearson correlation",
-                "Not available" if pd.isna(pearson) else f"{pearson:.2f}"
+        a.metric(
+            "Pearson correlation",
+            "Not available" if pd.isna(pearson) else f"{pearson:.2f}"
+        )
             )
 
             b.metric(

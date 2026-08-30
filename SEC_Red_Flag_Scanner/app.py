@@ -638,9 +638,6 @@ kept separate because keyword presence alone does not establish financial distre
 
 **Historical test**
 
-For each company, an earlier 10-K fiscal year is selected when the following year's
-revenue is available. The framework score is calculated for the earlier year and
-compared with subsequent reported revenue growth. This creates a simple out-of-sample
-directional test rather than assuming the framework works.
+For each company, up to five historical 10-K fiscal years are selected when the following year's revenue is available. The framework score is calculated using information from each historical fiscal year and compared with the company's subsequent reported revenue growth. Pearson and Spearman correlations are reported to examine both linear and rank-order associations. This is an exploratory historical test, not evidence that the framework predicts financial distress or investment returns.
 """
     )

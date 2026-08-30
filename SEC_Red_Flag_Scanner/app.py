@@ -81,21 +81,71 @@ if st.button("Run red-flag scan",type="primary"):
     except Exception as e: st.error(f"SEC retrieval failed: {e}"); st.stop()
 
 if "score" in st.session_state:
-    a,b,c=st.columns(3)
-    a.metric("Red-flag score",f"{st.session_state.score}/100")
-    b.metric("Signals",len(st.session_state.flags))
-    c.metric("Evidence snippets",len(st.session_state.snips))
+    a, b, c = st.columns(3)
+
+    a.metric(
+        "Red-flag score",
+        f"{st.session_state['score']}/100"
+    )
+
+    b.metric(
+        "Signals",
+        len(st.session_state["flags"])
+    )
+
+    c.metric(
+        "Evidence snippets",
+        len(st.session_state["snips"])
+    )
+
     st.subheader("Signals")
-    st.dataframe(pd.DataFrame([{"Signal":x[0],"Severity":x[1],"Trigger":x[2]} for x in st.session_state.flags]),use_container_width=True,hide_index=True)
+
+    if st.session_state["flags"]:
+        signal_data = []
+
+        for signal, severity, trigger in st.session_state["flags"]:
+            signal_data.append({
+                "Signal": signal,
+                "Severity": severity,
+                "Trigger": trigger
+            })
+
+        signal_df = pd.DataFrame(signal_data)
+
+        st.dataframe(
+            signal_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+        st.success("No major heuristic signals detected.")
+
     st.subheader("Evidence")
-    for i,x in enumerate(st.session_state.snips,1):
-        with st.expander(f"Evidence {i}"): st.write(x)
+
+    for i, snippet in enumerate(st.session_state["snips"], 1):
+        with st.expander(f"Evidence {i}"):
+            st.write(snippet)
+
     st.subheader("Analyst follow-ups")
-    for x in ["Reconcile earnings with operating/free cash flow.","Inspect debt maturities and covenants.","Compare receivables/working capital with revenue.","Read relevant footnotes and risk factors."]: st.write("• "+x)
-st.download_button(
-    "Download analyst report",
-    st.session_state["report"],
-    file_name=f"{str(st.session_state['company']).replace(' ','_')}_red_flags.md",
-    mime="text/markdown"
-)
-    st.markdown(f"[Open SEC filing]({st.session_state.url})")
+
+    followups = [
+        "Reconcile earnings with operating/free cash flow.",
+        "Inspect debt maturities and covenants.",
+        "Compare receivables and working capital with revenue.",
+        "Read relevant footnotes and risk factors."
+    ]
+
+    for item in followups:
+        st.write("• " + item)
+
+    st.download_button(
+        label="Download analyst report",
+        data=st.session_state["report"],
+        file_name=f"{str(st.session_state['company']).replace(' ', '_')}_red_flags.md",
+        mime="text/markdown"
+    )
+
+    st.markdown(
+        f"[Open SEC filing]({st.session_state['url']})"
+    )

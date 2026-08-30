@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 
 SEC_HEADERS = {
-    "User-Agent": "SEC Filing Red-Flag Scanner/1.0 student-research-demo contact@example.com"
+    "User-Agent": "SEC Filing Red-Flag Scanner/1.0 academic-research-demo contact@example.com"
 }
 
 # ============================================================
@@ -388,6 +388,57 @@ def filing_signals(text):
 
 
 # ============================================================
+# RESEARCH / DISPLAY HELPERS
+# ============================================================
+
+def correlation_label(value):
+    if pd.isna(value):
+        return "Not available"
+    magnitude = abs(float(value))
+    if magnitude < 0.10:
+        strength = "negligible"
+    elif magnitude < 0.30:
+        strength = "weak"
+    elif magnitude < 0.50:
+        strength = "moderate"
+    else:
+        strength = "strong"
+    direction = "positive" if value > 0 else "negative" if value < 0 else "approximately zero"
+    return f"{strength} {direction} association"
+
+
+def score_range_summary(bt):
+    frame = bt.copy()
+    frame["Score range"] = pd.cut(
+        frame["Score"],
+        bins=[-1, 69, 84, 100],
+        labels=[
+            "High risk (<70)",
+            "Moderate (70–84)",
+            "Low risk (85–100)"
+        ]
+    )
+    summary = (
+        frame.groupby("Score range", observed=False)["Forward revenue growth"]
+        .agg(["count", "mean", "median"])
+        .reset_index()
+    )
+    summary.columns = [
+        "Score range",
+        "Observations",
+        "Mean forward growth (%)",
+        "Median forward growth (%)"
+    ]
+    return summary
+
+
+def research_note(title, body, kind="info"):
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        st.caption(body)
+
+
+# ============================================================
 # HISTORICAL BACKTEST
 # ============================================================
 
@@ -529,7 +580,11 @@ st.set_page_config(
 
 st.title("🔎 SEC Filing Red-Flag Scanner")
 st.caption(
-    "SEC EDGAR → XBRL financial data → transparent risk framework → historical test"
+    "SEC EDGAR → XBRL financial data → transparent financial-profile framework → historical test"
+)
+st.info(
+    "Research design: quantitative filing data are scored separately from qualitative filing-language review signals. "
+    "The historical test is exploratory and is not investment advice."
 )
 
 tab1, tab2, tab3 = st.tabs([
@@ -655,11 +710,21 @@ with tab1:
             len(x["qflags"])
         )
 
+        st.caption(f"Latest 10-K filing: {x['filing_date']}")
+
         st.caption(
-            "Higher score = stronger profile. Filing-language matches are "
-            "review signals and are intentionally excluded from the "
-            "quantitative score."
+            "Higher score = stronger financial profile. Filing-language matches are "
+            "review signals and are intentionally excluded from the quantitative score."
         )
+
+        with st.container(border=True):
+            st.markdown("**How to read this score**")
+            st.write(
+                "The score starts at 100 and subtracts points only when predefined "
+                "quantitative thresholds are triggered. A high score means fewer "
+                "detected quantitative warning conditions; it does not mean the "
+                "company is free of risk."
+            )
 
         st.subheader("Quantitative risk signals")
 
@@ -731,8 +796,9 @@ with tab2:
     )
 
     st.info(
-        "The sample is intentionally fixed at 20 large public companies "
-        "so the methodology is reproducible rather than cherry-picked."
+        "The sample is intentionally fixed at 20 large public companies so the methodology is "
+        "reproducible rather than cherry-picked. The cross-sectional result is descriptive: "
+        "it is not a representative sample of all public companies."
     )
 
     if st.button(
@@ -815,8 +881,9 @@ with tab2:
         and not st.session_state["study"].empty
     ):
         d = st.session_state["study"].sort_values(
-            "Risk score"
-        )
+            ["Risk score", "Ticker"],
+            ascending=[True, True]
+        ).reset_index(drop=True)
 
         a, b, c = st.columns(3)
 
@@ -854,10 +921,23 @@ with tab2:
             "text/csv"
         )
 
-        st.caption(
-            "Important: this is descriptive cross-sectional research. "
-            "Because most companies score highly, the historical backtest "
-            "provides a stronger next-stage calibration test."
+        low_variation = d["Risk score"].nunique() <= 4
+        if low_variation or (d["Risk score"] >= 85).mean() >= 0.75:
+            st.warning(
+                "Interpretation: most companies cluster in the high-score range. "
+                "That limited variation makes this cross-sectional comparison a weak "
+                "test of discrimination; the historical backtest is the stronger calibration test."
+            )
+        else:
+            st.info(
+                "Interpretation: the sample contains more score variation, but this remains "
+                "descriptive cross-sectional research rather than predictive evidence."
+            )
+
+        research_note(
+            "Research takeaway",
+            "Use this table to compare detected warning conditions across the fixed sample, not to rank companies as investments. "
+            "Filing-language signals are contextual and are not added to the quantitative score."
         )
 
 
@@ -879,9 +959,8 @@ with tab3:
     )
 
     st.warning(
-        "A 20-company backtest is exploratory, not statistically conclusive. "
-        "Its purpose is to test the framework and generate a falsifiable "
-        "research hypothesis."
+        "A 20-company backtest is exploratory, not statistically conclusive. Its purpose is to test the framework "
+        "and generate a falsifiable research hypothesis. A correlation here does not establish causation or investment performance."
     )
 
     if st.button(
@@ -934,33 +1013,45 @@ with tab3:
                 method="pearson"
             )
 
-            # Calculate Spearman using pandas ranks rather than scipy.
-            # This keeps the Streamlit app dependency-light and avoids the
-            # ModuleNotFoundError caused by scipy.stats on Streamlit Cloud.
+            # Spearman is calculated from ranks so scipy is not required.
             score_rank = bt["Score"].rank(method="average")
             growth_rank = bt["Forward revenue growth"].rank(method="average")
             spearman = score_rank.corr(growth_rank)
 
-            a, b = st.columns(2)
-
+            a, b, c = st.columns(3)
             a.metric(
                 "Pearson correlation",
-                "Not available"
-                if pd.isna(pearson)
-                else f"{pearson:.2f}"
+                "Not available" if pd.isna(pearson) else f"{pearson:.2f}"
             )
-
             b.metric(
                 "Spearman correlation",
-                "Not available"
-                if pd.isna(spearman)
-                else f"{spearman:.2f}"
+                "Not available" if pd.isna(spearman) else f"{spearman:.2f}"
+            )
+            c.metric(
+                "Unique score values",
+                int(bt["Score"].nunique())
             )
 
-            st.subheader(
-                "Framework score vs. subsequent revenue growth"
-            )
+            st.subheader("Key finding")
+            if pd.isna(pearson):
+                st.info(
+                    "The sample does not contain enough variation to calculate a meaningful Pearson correlation."
+                )
+            else:
+                label = correlation_label(pearson)
+                st.info(
+                    f"In this exploratory sample, the Pearson correlation is **{pearson:.2f}**, indicating a "
+                    f"**{label}** between the framework score and following-year revenue growth. "
+                    "This does not establish causation, predictive power, or investment performance."
+                )
 
+            if not pd.isna(spearman):
+                st.caption(
+                    f"Spearman ρ = {spearman:.2f}. The rank-based result is useful as a robustness check because it is "
+                    "less dependent on the exact scale of individual observations."
+                )
+
+            st.subheader("Framework score vs. subsequent revenue growth")
             st.scatter_chart(
                 bt,
                 x="Score",
@@ -969,62 +1060,27 @@ with tab3:
                 y_label="Following-year revenue growth (%)"
             )
 
-            if not pd.isna(pearson):
-                direction = (
-                    "positive"
-                    if pearson > 0
-                    else "negative"
-                    if pearson < 0
-                    else "approximately zero"
-                )
-
-                st.write(
-                    f"In this exploratory sample, the Pearson correlation "
-                    f"is **{pearson:.2f}** ({direction}). This is an "
-                    "association, not evidence of causation or investment "
-                    "performance."
-                )
-
-            # Score-range analysis
-            bt["Score range"] = pd.cut(
-                bt["Score"],
-                bins=[-1, 69, 84, 100],
-                labels=[
-                    "High risk (<70)",
-                    "Moderate (70–84)",
-                    "Low risk (85–100)"
-                ]
-            )
-
-            summary = (
-                bt.groupby(
-                    "Score range",
-                    observed=False
-                )["Forward revenue growth"]
-                .agg(["count", "mean", "median"])
-                .reset_index()
-            )
-
-            summary.columns = [
-                "Score range",
-                "Observations",
-                "Mean forward growth (%)",
-                "Median forward growth (%)"
-            ]
-
-            st.subheader(
-                "Subsequent growth by score range"
-            )
-
+            summary = score_range_summary(bt)
+            st.subheader("Subsequent growth by score range")
             st.dataframe(
                 summary,
                 use_container_width=True,
                 hide_index=True
             )
 
+            low_n = int(summary.loc[summary["Score range"] == "Low risk (85–100)", "Observations"].iloc[0]) if not summary.loc[summary["Score range"] == "Low risk (85–100)"].empty else 0
+            moderate_n = int(summary.loc[summary["Score range"] == "Moderate (70–84)", "Observations"].iloc[0]) if not summary.loc[summary["Score range"] == "Moderate (70–84)"].empty else 0
+            high_n = int(summary.loc[summary["Score range"] == "High risk (<70)", "Observations"].iloc[0]) if not summary.loc[summary["Score range"] == "High risk (<70)"].empty else 0
+
+            if max(low_n, moderate_n, high_n) > 0.75 * len(bt):
+                st.warning(
+                    f"Sample-balance limitation: {max(low_n, moderate_n, high_n)} of {len(bt)} observations fall in one score range. "
+                    "Comparisons between ranges should therefore be treated cautiously."
+                )
+
             st.caption(
-                "Score-range results are descriptive and should not be "
-                "interpreted as causal or predictive evidence."
+                "Score-range results are descriptive. The backtest tests association with subsequent reported revenue growth, "
+                "not stock returns, valuation, fraud, or causation."
             )
 
         st.download_button(
@@ -1037,6 +1093,11 @@ with tab3:
     st.markdown("---")
 
     st.subheader("Methodology")
+
+    st.markdown(
+        "**Core design:** 100-point quantitative financial-profile score + separate qualitative filing review. "
+        "The quantitative score uses four predefined thresholds; qualitative keywords are shown as review signals only."
+    )
 
     st.markdown(
         """

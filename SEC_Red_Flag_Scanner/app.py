@@ -101,7 +101,16 @@ TAGS = {
 
 
 def extract_annual(facts, metric):
+    """Extract one defensible annual observation per fiscal year.
+
+    Duration-based metrics (revenue, net income and OCF) are restricted to
+    roughly annual reporting periods. Instant/balance-sheet metrics are not.
+    This avoids accidentally selecting a short-period XBRL fact that carries
+    the same fiscal-year label.
+    """
     usgaap = facts.get("facts", {}).get("us-gaap", {})
+
+    duration_metrics = {"revenue", "net_income", "ocf"}
 
     for tag in TAGS[metric]:
         if tag not in usgaap:
@@ -121,23 +130,48 @@ def extract_annual(facts, metric):
 
             try:
                 value = float(x["val"])
+                fy = int(x["fy"])
             except Exception:
                 continue
 
+            start = x.get("start")
+            end = x.get("end")
+
+            # For duration metrics, require a roughly full fiscal-year period.
+            if metric in duration_metrics:
+                if not start or not end:
+                    continue
+
+                try:
+                    start_dt = pd.Timestamp(start)
+                    end_dt = pd.Timestamp(end)
+                    days = (end_dt - start_dt).days
+                except Exception:
+                    continue
+
+                if not 300 <= days <= 380:
+                    continue
+
             rows.append({
-                "fy": int(x["fy"]),
-                "end": x.get("end"),
+                "fy": fy,
+                "start": start,
+                "end": end,
                 "val": value
             })
 
         if rows:
+            df = pd.DataFrame(rows)
+
+            # Prefer the latest reporting end date for a fiscal year.
+            # This makes the selection deterministic when SEC facts contain
+            # multiple 10-K observations carrying the same FY.
             return (
-                pd.DataFrame(rows)
-                .sort_values(["fy", "end"])
+                df.sort_values(["fy", "end"])
                 .drop_duplicates("fy", keep="last")
+                .reset_index(drop=True)
             )
 
-    return pd.DataFrame(columns=["fy", "end", "val"])
+    return pd.DataFrame(columns=["fy", "start", "end", "val"])
 
 
 def value_for_fy(facts, metric, fy):
@@ -883,6 +917,11 @@ with tab3:
             len(bt)
         )
 
+        st.caption(
+            "Annual XBRL duration filters are applied to revenue, net income "
+            "and operating cash flow to reduce distorted period selections."
+        )
+
         st.dataframe(
             bt,
             use_container_width=True,
@@ -895,10 +934,12 @@ with tab3:
                 method="pearson"
             )
 
-            spearman = bt["Score"].corr(
-                bt["Forward revenue growth"],
-                method="spearman"
-            )
+            # Calculate Spearman using pandas ranks rather than scipy.
+            # This keeps the Streamlit app dependency-light and avoids the
+            # ModuleNotFoundError caused by scipy.stats on Streamlit Cloud.
+            score_rank = bt["Score"].rank(method="average")
+            growth_rank = bt["Forward revenue growth"].rank(method="average")
+            spearman = score_rank.corr(growth_rank)
 
             a, b = st.columns(2)
 

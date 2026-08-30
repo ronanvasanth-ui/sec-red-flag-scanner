@@ -544,7 +544,7 @@ with tab3:
         a.metric(
             "Pearson correlation",
             "Not available" if pd.isna(pearson) else f"{pearson:.2f}"
-        )
+        
             )
 
             b.metric(

@@ -537,7 +537,7 @@ with tab1:
         st.download_button(
             "Download analyst report",
             result["report"],
-            file_name=f"{result['company'].replace(' ', '_')}_red_flags.md",
+            file_name="SEC_red_flag_report.md",
             mime="text/markdown",
         )
 

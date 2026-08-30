@@ -516,11 +516,15 @@ with tab3:
             st.metric("Score vs. next-year revenue-growth correlation",
                       "Not available" if pd.isna(corr) else f"{corr:.2f}")
 
-            st.subheader("Framework score vs. subsequent revenue growth")
-            st.scatter_chart(
-                bt.set_index("Ticker")[["Score","Forward revenue growth"]]
-            )
+ st.subheader("Framework score vs. subsequent revenue growth")
 
+st.scatter_chart(
+    bt,
+    x="Score",
+    y="Forward revenue growth",
+    x_label="Historical framework score",
+    y_label="Following-year revenue growth (%)"
+)
             if not pd.isna(corr):
                 direction = "positive" if corr > 0 else "negative"
                 st.write(

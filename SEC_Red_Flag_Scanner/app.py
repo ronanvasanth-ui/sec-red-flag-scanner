@@ -507,9 +507,10 @@ with tab3:
         """
     )
 
-    st.warning(
-        "A 20-company backtest is exploratory, not statistically conclusive. "
-        "Its purpose is to test the framework and generate a falsifiable research hypothesis."
+      st.warning(
+        "This historical backtest is exploratory rather than statistically conclusive. "
+        "It uses up to five historical fiscal years per company and is intended "
+        "to test the framework and generate a falsifiable research hypothesis."
     )
 
     if st.button("Run historical backtest", type="primary"):

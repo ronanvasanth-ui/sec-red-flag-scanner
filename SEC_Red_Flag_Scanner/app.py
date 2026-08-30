@@ -505,9 +505,9 @@ with tab3:
         The framework is scored using information available for the selected fiscal
         year. The outcome is the following year's reported revenue growth.
         """
-    )
+     )
 
-      st.warning(
+    st.warning(
         "This historical backtest is exploratory rather than statistically conclusive. "
         "It uses up to five historical fiscal years per company and is intended "
         "to test the framework and generate a falsifiable research hypothesis."

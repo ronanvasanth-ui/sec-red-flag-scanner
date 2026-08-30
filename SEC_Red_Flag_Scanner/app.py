@@ -99,79 +99,106 @@ TAGS = {
     ],
 }
 
+# Common IFRS concepts used by foreign private issuers.
+# Many SEC foreign issuers report under IFRS rather than US GAAP.
+IFRS_TAGS = {
+    "revenue": [
+        "Revenue",
+        "RevenueFromContractsWithCustomers",
+        "RevenueFromContractWithCustomerExcludingAssessedTax"
+    ],
+    "net_income": [
+        "ProfitLoss",
+        "ProfitLossAttributableToOwnersOfParent"
+    ],
+    "ocf": [
+        "CashFlowsFromUsedInOperatingActivities",
+        "NetCashFlowsFromUsedInOperatingActivities"
+    ],
+    "receivables": [
+        "TradeAndOtherCurrentReceivables",
+        "TradeAndOtherReceivables"
+    ],
+    "inventory": [
+        "Inventories"
+    ],
+    "debt": [
+        "BorrowingsCurrent",
+        "BorrowingsNoncurrent",
+        "CurrentBorrowings",
+        "NoncurrentBorrowings"
+    ],
+}
+
 
 def extract_annual(facts, metric):
     """Extract one defensible annual observation per fiscal year.
 
-    Duration-based metrics (revenue, net income and OCF) are restricted to
-    roughly annual reporting periods. Instant/balance-sheet metrics are not.
-    This avoids accidentally selecting a short-period XBRL fact that carries
-    the same fiscal-year label.
+    Supports US-GAAP and common IFRS concepts used in SEC 10-K, 20-F and
+    40-F annual reports. Missing concepts are treated as unavailable rather
+    than as zero.
     """
-    usgaap = facts.get("facts", {}).get("us-gaap", {})
+    namespaces = facts.get("facts", {})
 
-    duration_metrics = {"revenue", "net_income", "ocf"}
-
-    for tag in TAGS[metric]:
-        if tag not in usgaap:
-            continue
-
-        units = usgaap[tag].get("units", {})
-        unit = "USD" if "USD" in units else next(iter(units), None)
-
-        if not unit:
-            continue
-
-        rows = []
-
-        for x in units[unit]:
-            if x.get("form") != "10-K" or "fy" not in x:
+    candidates = []
+    for namespace, tag_list in (("us-gaap", TAGS[metric]), ("ifrs-full", IFRS_TAGS[metric])):
+        concept_store = namespaces.get(namespace, {})
+        for tag in tag_list:
+            if tag not in concept_store:
                 continue
 
-            try:
-                value = float(x["val"])
-                fy = int(x["fy"])
-            except Exception:
+            units = concept_store[tag].get("units", {})
+            unit = "USD" if "USD" in units else next(iter(units), None)
+            if not unit:
                 continue
 
-            start = x.get("start")
-            end = x.get("end")
-
-            # For duration metrics, require a roughly full fiscal-year period.
-            if metric in duration_metrics:
-                if not start or not end:
+            rows = []
+            for x in units[unit]:
+                if x.get("form") not in {"10-K", "20-F", "40-F"} or "fy" not in x:
                     continue
-
                 try:
-                    start_dt = pd.Timestamp(start)
-                    end_dt = pd.Timestamp(end)
-                    days = (end_dt - start_dt).days
+                    value = float(x["val"])
+                    fy = int(x["fy"])
                 except Exception:
                     continue
 
-                if not 300 <= days <= 380:
-                    continue
+                start = x.get("start")
+                end = x.get("end")
 
-            rows.append({
-                "fy": fy,
-                "start": start,
-                "end": end,
-                "val": value
-            })
+                if metric in {"revenue", "net_income", "ocf"}:
+                    if not start or not end:
+                        continue
+                    try:
+                        days = (pd.Timestamp(end) - pd.Timestamp(start)).days
+                    except Exception:
+                        continue
+                    if not 300 <= days <= 380:
+                        continue
 
-        if rows:
-            df = pd.DataFrame(rows)
+                rows.append({
+                    "fy": fy,
+                    "start": start,
+                    "end": end,
+                    "val": value,
+                    "namespace": namespace,
+                    "tag": tag,
+                })
 
-            # Prefer the latest reporting end date for a fiscal year.
-            # This makes the selection deterministic when SEC facts contain
-            # multiple 10-K observations carrying the same FY.
-            return (
-                df.sort_values(["fy", "end"])
-                .drop_duplicates("fy", keep="last")
-                .reset_index(drop=True)
-            )
+            if rows:
+                candidates.extend(rows)
 
-    return pd.DataFrame(columns=["fy", "start", "end", "val"])
+    if not candidates:
+        return pd.DataFrame(columns=["fy", "start", "end", "val", "namespace", "tag"])
+
+    df = pd.DataFrame(candidates)
+    # Prefer US-GAAP when both taxonomies contain the same FY; otherwise use
+    # the most recent reporting end date.
+    df["gaap_priority"] = (df["namespace"] == "us-gaap").astype(int)
+    return (
+        df.sort_values(["fy", "end", "gaap_priority"])
+        .drop_duplicates("fy", keep="last")
+        .reset_index(drop=True)
+    )
 
 
 def value_for_fy(facts, metric, fy):
@@ -200,6 +227,16 @@ def pct_growth(old, new):
 # ============================================================
 
 def score_year(facts, fy):
+    """Calculate a transparent 100-point financial-profile score.
+
+    The score is deliberately more discriminating than a simple four-flag
+    checklist.  It still starts at 100, but uses six fixed quantitative
+    warning conditions covering growth, cash conversion and balance-sheet
+    deterioration.  A trigger subtracts points; higher scores therefore mean
+    fewer detected warning conditions.
+
+    These rules are screening signals, not evidence of fraud or distress.
+    """
     metrics = {}
     points = 0
     flags = []
@@ -210,6 +247,7 @@ def score_year(facts, fy):
     rec0 = value_for_fy(facts, "receivables", fy - 1)
     rec1 = value_for_fy(facts, "receivables", fy)
 
+    ni0 = value_for_fy(facts, "net_income", fy - 1)
     ni1 = value_for_fy(facts, "net_income", fy)
     ocf1 = value_for_fy(facts, "ocf", fy)
 
@@ -219,8 +257,20 @@ def score_year(facts, fy):
     inv0 = value_for_fy(facts, "inventory", fy - 1)
     inv1 = value_for_fy(facts, "inventory", fy)
 
+    # --------------------------------------------------------
+    # Growth / operating metrics
+    # --------------------------------------------------------
     if rev0 is not None and rev1 is not None:
         metrics["Revenue growth"] = pct_growth(rev0, rev1)
+
+        if metrics["Revenue growth"] <= -5:
+            points += 6
+            flags.append((
+                "Growth",
+                "Revenue declined materially",
+                6,
+                f"Revenue growth: {metrics['Revenue growth']:.1f}%"
+            ))
 
     if rec0 is not None and rec1 is not None:
         metrics["Receivables growth"] = pct_growth(rec0, rec1)
@@ -229,45 +279,59 @@ def score_year(facts, fy):
         metrics.get("Revenue growth") is not None
         and metrics.get("Receivables growth") is not None
     ):
-        gap = (
-            metrics["Receivables growth"]
-            - metrics["Revenue growth"]
-        )
+        gap = metrics["Receivables growth"] - metrics["Revenue growth"]
+        metrics["Receivables / revenue growth gap"] = gap
 
-        if gap >= 15:
-            points += 12
+        if gap >= 10:
+            points += 10
             flags.append((
                 "Working capital",
                 "Receivables materially outpaced revenue",
-                12,
+                10,
                 f"Gap: {gap:.1f} percentage points"
             ))
 
-    if (
-        ni1 is not None
-        and ocf1 is not None
-        and ni1 > 0
-        and ocf1 < ni1 * 0.60
-    ):
-        ratio = ocf1 / ni1 * 100
-        points += 12
+    # --------------------------------------------------------
+    # Cash conversion
+    # --------------------------------------------------------
+    if ni1 is not None and ocf1 is not None:
+        if ni1 > 0:
+            ratio = ocf1 / ni1 * 100
+            metrics["OCF / net income"] = ratio
 
-        flags.append((
-            "Cash flow",
-            "Operating cash flow materially trailed net income",
-            12,
-            f"OCF / net income: {ratio:.0f}%"
-        ))
+            if ocf1 < 0:
+                points += 12
+                flags.append((
+                    "Cash flow",
+                    "Operating cash flow was negative despite positive net income",
+                    12,
+                    f"OCF / net income: {ratio:.0f}%"
+                ))
+            elif ratio < 80:
+                points += 10
+                flags.append((
+                    "Cash flow",
+                    "Operating cash flow materially trailed net income",
+                    10,
+                    f"OCF / net income: {ratio:.0f}%"
+                ))
+        elif ocf1 < 0:
+            points += 10
+            flags.append((
+                "Cash flow",
+                "Operating cash flow was negative",
+                10,
+                "Negative OCF"
+            ))
 
+    # --------------------------------------------------------
+    # Balance-sheet deterioration
+    # --------------------------------------------------------
     if debt0 is not None and debt1 is not None:
         metrics["Debt growth"] = pct_growth(debt0, debt1)
 
-        if (
-            metrics["Debt growth"] is not None
-            and metrics["Debt growth"] >= 20
-        ):
+        if metrics["Debt growth"] >= 10:
             points += 8
-
             flags.append((
                 "Liquidity",
                 "Debt increased materially",
@@ -278,12 +342,8 @@ def score_year(facts, fy):
     if inv0 is not None and inv1 is not None:
         metrics["Inventory growth"] = pct_growth(inv0, inv1)
 
-        if (
-            metrics["Inventory growth"] is not None
-            and metrics["Inventory growth"] >= 25
-        ):
+        if metrics["Inventory growth"] >= 15:
             points += 6
-
             flags.append((
                 "Business quality",
                 "Inventory increased materially",
@@ -291,7 +351,20 @@ def score_year(facts, fy):
                 f"Inventory growth: {metrics['Inventory growth']:.1f}%"
             ))
 
-    score = max(0, 100 - min(60, points))
+    if ni0 is not None and ni1 is not None and ni0 != 0:
+        metrics["Net income growth"] = pct_growth(ni0, ni1)
+
+        if metrics["Net income growth"] <= -10:
+            points += 6
+            flags.append((
+                "Profitability",
+                "Net income declined materially",
+                6,
+                f"Net income growth: {metrics['Net income growth']:.1f}%"
+            ))
+
+    # Cap the maximum deduction so the score remains on a 0–100 scale.
+    score = max(0, 100 - min(70, points))
 
     return score, flags, metrics
 
@@ -450,15 +523,20 @@ SAMPLE = [
 ]
 
 
-def annual_10ks(subs):
-    recent = pd.DataFrame(subs["filings"]["recent"])
+ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 
+
+def annual_reports(subs):
+    """Return SEC annual reports for US and foreign issuers."""
+    recent = pd.DataFrame(subs.get("filings", {}).get("recent", {}))
     if recent.empty:
         return pd.DataFrame()
+    return recent[recent["form"].isin(ANNUAL_FORMS)].sort_values("filingDate")
 
-    return recent[
-        recent["form"] == "10-K"
-    ].sort_values("filingDate")
+
+def annual_10ks(subs):
+    # Backward-compatible name used by the historical backtest.
+    return annual_reports(subs)
 
 
 def historical_observation(ticker, row, facts, cik):
@@ -608,6 +686,8 @@ with tab1:
         placeholder="Apple, NVIDIA, Tesla..."
     )
 
+    st.caption("Searches SEC-registered public companies by ticker or company name. US issuers usually file 10-K; foreign private issuers may file 20-F or 40-F.")
+
     matches = tickers
 
     if q:
@@ -651,10 +731,10 @@ with tab1:
                 "Reading SEC filing and XBRL data..."
             ):
                 subs = get_submissions(cik)
-                ks = annual_10ks(subs)
+                ks = annual_reports(subs)
 
                 if ks.empty:
-                    st.error("No recent 10-K found.")
+                    st.error("No recent SEC annual report found (10-K, 20-F or 40-F). This may be a foreign/non-SEC issuer, fund, or a company with no current annual filing.")
                     st.stop()
 
                 latest = ks.iloc[-1]
@@ -684,8 +764,13 @@ with tab1:
                     "evidence": evidence,
                     "metrics": metrics,
                     "filing_date": latest["filingDate"],
+                    "filing_form": latest.get("form", ""),
                     "url": url
                 }
+
+                available_metrics = [k for k, v in metrics.items() if v is not None]
+                if len(available_metrics) < 3 and latest.get("form") in {"20-F", "40-F"}:
+                    st.warning("This foreign annual report uses XBRL concepts that are only partially mapped to the framework. The score should be treated as incomplete rather than as evidence of a clean profile.")
 
         except Exception as e:
             st.error(f"SEC analysis failed: {e}")
@@ -710,7 +795,7 @@ with tab1:
             len(x["qflags"])
         )
 
-        st.caption(f"Latest 10-K filing: {x['filing_date']}")
+        st.caption(f"Latest SEC annual filing: {x['filing_date']} · Form {x.get('filing_form', 'annual report')}")
 
         st.caption(
             "Higher score = stronger financial profile. Filing-language matches are "
@@ -1096,25 +1181,30 @@ with tab3:
 
     st.markdown(
         "**Core design:** 100-point quantitative financial-profile score + separate qualitative filing review. "
-        "The quantitative score uses four predefined thresholds; qualitative keywords are shown as review signals only."
+        "The quantitative score uses six predefined warning conditions; qualitative keywords are shown as review signals only."
     )
 
     st.markdown(
         """
 **Quantitative scoring**
 
-- Receivables growth ≥ 15 percentage points above revenue growth: 12 points
-- Operating cash flow < 60% of net income: 12 points
-- Debt growth ≥ 20%: 8 points
-- Inventory growth ≥ 25%: 6 points
+The score starts at 100 and subtracts points when fixed warning conditions are triggered:
 
-The score starts at 100 and subtracts triggered points. Filing-language
-signals are kept separate because keyword presence alone does not establish
-financial distress.
+- Revenue decline ≥ 5%: 6 points
+- Receivables growth ≥ 10 percentage points above revenue growth: 10 points
+- Operating cash flow negative despite positive net income: 12 points
+- Operating cash flow below 80% of positive net income: 10 points
+- Debt growth ≥ 10%: 8 points
+- Inventory growth ≥ 15%: 6 points
+- Net income decline ≥ 10%: 6 points
+
+The negative-OCF condition and the OCF/net-income condition are mutually exclusive, so cash-flow weakness is not double-counted. The score is capped at a 70-point maximum deduction and remains on a 0–100 scale.
+
+A score of 100 means that none of these predefined quantitative conditions was detected in the available XBRL data. It does **not** mean the company is risk-free. Filing-language signals are kept separate because keyword presence alone does not establish financial distress.
 
 **Historical test**
 
-For each company, an earlier 10-K fiscal year is selected when the following
+For each company, an earlier annual SEC report (10-K, 20-F or 40-F) is selected when the following
 year's revenue is available. The framework score is calculated for the earlier
 year and compared with subsequent reported revenue growth. This creates a
 simple out-of-sample directional test rather than assuming the framework works.

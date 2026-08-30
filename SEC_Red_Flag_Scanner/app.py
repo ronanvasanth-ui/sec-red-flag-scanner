@@ -515,7 +515,7 @@ with tab3:
     if st.button("Run historical backtest", type="primary"):
         try:
             tickers=get_tickers()
-            bt=run_backtest(tickers)
+            bt=run_backtest(tickers, years_per_company=5)
             st.session_state["backtest"]=bt
         except Exception as e:
             st.error(f"Backtest failed: {e}")

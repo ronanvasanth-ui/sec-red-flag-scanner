@@ -250,49 +250,66 @@ def historical_observation(ticker, row, facts, cik):
         "Revenue growth at score date": metrics.get("Revenue growth"),
     }
 
-def run_backtest(tickers_df):
+def run_backtest(tickers_df, years_per_company=5):
     rows = []
     progress = st.progress(0, text="Building historical observations...")
 
     for i, ticker in enumerate(SAMPLE):
         m = tickers_df[tickers_df["ticker"] == ticker]
+
         if m.empty:
             continue
+
         r = m.iloc[0]
 
         try:
             subs = get_submissions(r["cik"])
             ks = annual_10ks(subs)
-            if len(ks) < 2:
+
+            if ks.empty:
                 continue
 
             facts = get_companyfacts(r["cik"])
 
-            # Prefer an observation with a following fiscal year available.
+            # Find fiscal years for which the following year's
+            # revenue is available.
             candidates = []
-            for _, row in ks.iloc[:-1].iterrows():
-                fy = int(row["reportDate"][:4])
+
+            for _, row in ks.iterrows():
+                if not row.get("reportDate"):
+                    continue
+
+                try:
+                    fy = int(row["reportDate"][:4])
+                except Exception:
+                    continue
+
                 if value_for_fy(facts, "revenue", fy + 1) is not None:
                     candidates.append(row)
 
-            if not candidates:
-                continue
+            # Keep the most recent N eligible fiscal years.
+            candidates = candidates[-years_per_company:]
 
-            row = candidates[-1]
-            obs = historical_observation(ticker, row, facts, r["cik"])
-            if obs:
-                rows.append(obs)
+            for row in candidates:
+                obs = historical_observation(
+                    ticker, row, facts, r["cik"]
+                )
+
+                if obs:
+                    rows.append(obs)
 
         except Exception:
             pass
 
-        progress.progress((i+1)/len(SAMPLE),
-                           text=f"Processing {ticker} ({i+1}/{len(SAMPLE)})...")
+        progress.progress(
+            (i + 1) / len(SAMPLE),
+            text=f"Processing {ticker} ({i+1}/{len(SAMPLE)})..."
+        )
+
         time.sleep(0.1)
 
     progress.empty()
     return pd.DataFrame(rows)
-
 # ============================================================
 # UI
 # ============================================================
